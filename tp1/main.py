@@ -167,12 +167,11 @@ if __name__ == "__main__":
     secundario.start()
 
     try:
-        # Espera que ambos procesos terminen
         secundario.join()
         principal.join()
     except (KeyboardInterrupt, SystemExit):
         print("Interrupción en el proceso principal. Terminando todos los procesos de manera controlada.")
         event.set()
-        principal.terminate()  # Termina el proceso principal
-        secundario.terminate()  # Termina el proceso secundario
+        principal.terminate()  
+        secundario.terminate() 
         sys.exit(0)
