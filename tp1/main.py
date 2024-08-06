@@ -35,11 +35,18 @@ def aplicar_filtro(parte_imagen, filtro_seleccionado):
     return parte_filtrada
 
 def procesar_parte(parte, shared_memory, shape, index, conn, filtro_seleccionado):
-    resultado = aplicar_filtro(parte, filtro_seleccionado)  
-    shared_array = np.frombuffer(shared_memory.get_obj()).reshape(shape) 
-    shared_array[index:index+parte.shape[0], :, :] = resultado 
-    conn.send('done') 
-    conn.close() 
+    try:
+        # print('event')
+        # time.sleep(3) 
+        resultado = aplicar_filtro(parte, filtro_seleccionado)  
+        shared_array = np.frombuffer(shared_memory.get_obj()).reshape(shape) 
+        shared_array[index:index+parte.shape[0], :, :] = resultado 
+        conn.send('done') 
+        conn.close() 
+    except (KeyboardInterrupt, SystemExit):
+        print("Proceso Worker interrumpido. Terminando de manera controlada.")
+        sys.exit(0)
+
 def proceso_coordinador(pipes, event, n):
     try:
         for i in range(n):
@@ -63,8 +70,12 @@ def crear_procesos_y_procesar(shared_memory, shape, partes, event, filtro_selecc
     
     for proceso in procesos:
         proceso.start()  
-    
-    proceso_coord.start()  
+
+    # print('event')
+    # time.sleep(3) 
+
+    proceso_coord.start() 
+
     
     try:
         for proceso in procesos:
@@ -85,7 +96,9 @@ def guardar_imagen(shared_memory, shape, ruta_salida):
     imagen_final.save(ruta_salida) 
 def proceso_principal(shared_memory, shape, start_time, image_output, event):
     try:
-        event.wait() 
+        event.wait()
+        # print('event')
+        # time.sleep(3) 
         guardar_imagen(shared_memory, shape, image_output) 
         total_time = time.time() - start_time  
         print(f'Tiempo total: {total_time}') 
