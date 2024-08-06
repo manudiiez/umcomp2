@@ -1,26 +1,34 @@
-import multiprocessing
+import multiprocessing as mp
 import os
 import time
 
 def worker():
     print(f'Worker PID: {os.getpid()} is starting...')
-    time.sleep(2)
-    print(f'Worker PID: {os.getpid()} is finishing...')
+    try:
+        while True:
+            time.sleep(1)  # Mantener el proceso activo
+    except KeyboardInterrupt:
+        print(f'Worker PID: {os.getpid()} is terminating...')
 
 if __name__ == "__main__":
     print(f'Main process PID: {os.getpid()}')
-    
-    # Crear el proceso hijo
-    p = multiprocessing.Process(target=worker)
-    p.start()
-    
-    # Esperar a que el proceso hijo termine sin recogerlo
-    time.sleep(3)
-    print(f'Main process PID: {os.getpid()} is finished sleeping.')
 
-    # En este punto, el proceso hijo debe ser un proceso zombie
-    while True:
-        time.sleep(1)
-        print(f'Main process PID: {os.getpid()} is still running. Check for zombie process.')
+    num_workers = 4  # Número de procesos a crear
+    processes = []
 
-# Nota: No estamos usando p.join() intencionalmente para dejar el proceso hijo en estado zombie.
+    for _ in range(num_workers):
+        p = mp.Process(target=worker)
+        p.start()
+        print(f'Started worker with PID: {p.pid}')
+        processes.append(p)
+    
+    try:
+        for p in processes:
+            p.join()
+    except KeyboardInterrupt:
+        print("Main process received interrupt. Terminating workers...")
+        for p in processes:
+            p.terminate()
+        for p in processes:
+            p.join()
+        print("All workers terminated.")

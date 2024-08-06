@@ -36,8 +36,6 @@ def aplicar_filtro(parte_imagen, filtro_seleccionado):
 
 def procesar_parte(parte, shared_memory, shape, index, conn, filtro_seleccionado):
     try:
-        # print('event')
-        # time.sleep(3) 
         resultado = aplicar_filtro(parte, filtro_seleccionado)  
         shared_array = np.frombuffer(shared_memory.get_obj()).reshape(shape) 
         shared_array[index:index+parte.shape[0], :, :] = resultado 
@@ -52,7 +50,6 @@ def proceso_coordinador(pipes, event, n):
         for i in range(n):
             pipes[i][0].recv()  
             pipes[i][0].close() 
-
         event.set() 
     except (KeyboardInterrupt, SystemExit):
         print("Proceso coordinador interrumpido. Terminando de manera controlada.")
@@ -70,9 +67,6 @@ def crear_procesos_y_procesar(shared_memory, shape, partes, event, filtro_selecc
     
     for proceso in procesos:
         proceso.start()  
-
-    # print('event')
-    # time.sleep(3) 
 
     proceso_coord.start() 
 
@@ -97,8 +91,6 @@ def guardar_imagen(shared_memory, shape, ruta_salida):
 def proceso_principal(shared_memory, shape, start_time, image_output, event):
     try:
         event.wait()
-        # print('event')
-        # time.sleep(3) 
         guardar_imagen(shared_memory, shape, image_output) 
         total_time = time.time() - start_time  
         print(f'Tiempo total: {total_time}') 
@@ -176,7 +168,6 @@ if __name__ == "__main__":
     
     # Inician los procesos
     principal.start()
-    # time.sleep(3)
     secundario.start()
 
     try:
