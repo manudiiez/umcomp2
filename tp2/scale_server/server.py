@@ -5,7 +5,6 @@ import cv2
 import pickle
 import os
 import signal
-import time
 
 
 class ScalingHandler(socketserver.BaseRequestHandler):
@@ -28,7 +27,6 @@ class ScalingHandler(socketserver.BaseRequestHandler):
         # Reducir el tamaño de la imagen
         nueva_imagen = cv2.resize(imagen, (0, 0), fx=factor_escala, fy=factor_escala)
         imagen_serializada = pickle.dumps(nueva_imagen)
-        time.sleep(10)  # Pausar la ejecución durante 5 segundos
         # Enviar la imagen reducida de vuelta
         self.request.sendall(imagen_serializada)
 
