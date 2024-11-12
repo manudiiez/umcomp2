@@ -6,7 +6,7 @@ import time
 import os
 import ipaddress
 
-def enviar_imagen(filepath, ip, port):
+def enviar_imagen(filepath, ip, port, scale):
     start_time = time.time()
     if not os.path.exists(filepath):
         print(f"Error: La ruta de la imagen '{filepath}' no existe.")
@@ -15,7 +15,7 @@ def enviar_imagen(filepath, ip, port):
     if imagen is None:
         print(f"Error: No se pudo leer la imagen en '{filepath}'. Verifique el archivo.")
         return
-    imagen_serializada = pickle.dumps(imagen)
+    data = pickle.dumps({'imagen': imagen, 'factor_escala': scale})
     # Determinar si la dirección IP es IPv4 o IPv6
     ip_version = ipaddress.ip_address(ip).version
     family = socket.AF_INET6 if ip_version == 6 else socket.AF_INET
@@ -26,7 +26,7 @@ def enviar_imagen(filepath, ip, port):
         except ConnectionRefusedError:
             print(f"Error: No se pudo conectar al servidor en {ip}:{port}. Asegúrese de que el servidor esté en funcionamiento.")
             return
-        s.sendall(imagen_serializada)
+        s.sendall(data)
         s.shutdown(socket.SHUT_WR) 
         
         
@@ -54,5 +54,6 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--file', type=str, required=True, help='Ruta de la imagen a enviar')
     parser.add_argument('-i', '--ip', type=str, required=True, help='Dirección IP del servidor')
     parser.add_argument('-p', '--port', type=int, required=True, help='Puerto del servidor')
+    parser.add_argument('-s', '--scale', type=float, required=True, help='Factor de escala para reducir el tamaño de la imagen (float)')
     args = parser.parse_args()
-    enviar_imagen(args.file, args.ip, args.port)
+    enviar_imagen(args.file, args.ip, args.port, args.scale)
