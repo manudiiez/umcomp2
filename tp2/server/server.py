@@ -6,6 +6,7 @@ import pickle
 
 
 async def manejar_cliente(reader, writer):
+    
     data = b""
     while True:
         packet = await reader.read(4096)
@@ -24,7 +25,17 @@ async def manejar_cliente(reader, writer):
 
     # Conectar con el segundo servidor para reducir el tamaño
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(("localhost", 9999))
+        try:
+            s.connect(("localhost", 9999))
+        except ConnectionRefusedError:
+            print("Error: No se pudo conectar al servidor de escalado en localhost:9999. Asegúrese de que el servidor de escalado esté en funcionamiento.")
+            # Enviar mensaje de error al cliente
+            mensaje_error = "Error: No se pudo conectar al servidor de escalado."
+            writer.write(mensaje_error.encode())
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            return
         s.sendall(data)
         s.shutdown(socket.SHUT_WR)
 
@@ -43,7 +54,7 @@ async def manejar_cliente(reader, writer):
     await writer.wait_closed()
 
 async def iniciar_servidor(ip, port):
-    server = await asyncio.start_server(manejar_cliente, ip, port)
+    server = await asyncio.start_server(manejar_cliente, ip, port, family=socket.AF_UNSPEC)
     addr = server.sockets[0].getsockname()
     print(f'Servidor corriendo en {addr}')
 
@@ -54,9 +65,8 @@ async def iniciar_servidor(ip, port):
             print("Servidor detenido.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Servidor de procesamiento de imágenes asíncrono con sockets")
+    parser = argparse.ArgumentParser(description="Tp2 - procesa imágenes | Servidor para convertir a escala de grises")
     parser.add_argument('-i', '--ip', type=str, required=True, help='Dirección IP para escuchar')
     parser.add_argument('-p', '--port', type=int, required=True, help='Puerto para escuchar')
     args = parser.parse_args()
-
     asyncio.run(iniciar_servidor(args.ip, args.port))
