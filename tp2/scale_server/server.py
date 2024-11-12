@@ -1,5 +1,3 @@
-# archivo: server_scaling.py
-
 import socketserver
 import cv2
 import pickle
