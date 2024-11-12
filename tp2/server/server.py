@@ -1,6 +1,9 @@
 import asyncio
+import socket
 import argparse
-from functions import procesar_imagen, convertir_a_grises
+from functions import convertir_a_grises
+import pickle
+
 
 async def manejar_cliente(reader, writer):
     data = b""
@@ -16,7 +19,25 @@ async def manejar_cliente(reader, writer):
         return
 
     imagen_gris = await convertir_a_grises(data)
-    writer.write(imagen_gris)
+    factor_escala = 0.5
+    data = pickle.dumps({'imagen': imagen_gris, 'factor_escala': factor_escala})
+
+    # Conectar con el segundo servidor para reducir el tamaño
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect(("localhost", 9999))
+        s.sendall(data)
+        s.shutdown(socket.SHUT_WR)
+
+        # Recibir la imagen reducida
+        imagen_reducida = b""
+        while True:
+            packet = s.recv(4096)
+            if not packet:
+                break
+            imagen_reducida += packet
+
+    # Enviar la imagen reducida de vuelta al cliente original
+    writer.write(imagen_reducida)
     await writer.drain()
     writer.close()
     await writer.wait_closed()
