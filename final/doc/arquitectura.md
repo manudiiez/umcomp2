@@ -1,78 +1,142 @@
-# Arquitectura del Sistema
+# Arquitectura del Sistema — RealtyEdit
 
-## Diagrama general
+## Diagrama de Nodos y Conectividad
 
 ```mermaid
 flowchart TD
-    C1["Cliente CLI\n--tipo portal --file casa.jpg"]
-    C2["Cliente CLI\n--tipo instagram --file depto.jpg"]
+    CLI["🖥️ **CLIENTE** cli\nclient.py\n─────────────────\n--image foto.jpg\n--type watermark\n--location 'Mendoza'\n--property-type 'Casa'\n--condition 'Venta'"]
 
-    SRV["Servidor Principal\nasyncio.start_server()"]
+    SRV["⚙️ **SERVIDOR TCP** server.py\n─────────────────\nEscucha puerto 9000\nasyncio I/O no bloqueante"]
 
-    NOTIF["Proceso Notificador\nmultiprocessing.Process"]
-    Q["multiprocessing.Queue\nIPC"]
+    H1["👶 Proceso Hijo #1\ncliente 1"]
+    H2["👶 Proceso Hijo #2\ncliente 2"]
+    HN["👶 Proceso Hijo #N\ncliente N"]
 
-    REDIS["Redis\nBroker Celery"]
+    DISP["📬 **DISPATCHER** dispatcher.py\n─────────────────\nLee del pipe read_fd\nEncola en Celery\nRegistra en SQLite"]
 
-    WA["Worker A\nCelery — tipo portal\nPillow: marca de agua"]
-    WB["Worker B\nCelery — tipo instagram\nPillow: plantilla visual"]
+    WA["🔧 Worker A\nwatermark"]
+    WB["🔧 Worker B\ntemplate"]
+    WN["🔧 Worker N\nwatermark / template"]
 
-    DB["SQLite\npropimager.db"]
-    OUT["Disco\n/outputs/portal/\n/outputs/instagram/"]
+    REDIS[("🗄️ **REDIS**\nbroker + result backend")]
+    DB[("💾 **SQLite**\nhistorial de jobs")]
 
-    C1 -->|"Socket TCP\nJSON + bytes imagen"| SRV
-    C2 -->|"Socket TCP\nJSON + bytes imagen"| SRV
+    CLI -->|"TCP Socket\nimagen + JSON\npuerto 9000"| SRV
 
-    SRV -->|"celery.delay()"| REDIS
-    REDIS --> WA
-    REDIS --> WB
+    SRV -->|"fork()"| H1
+    SRV -->|"fork()"| H2
+    SRV -->|"fork()"| HN
 
-    WA -->|"resultado"| NOTIF
-    WB -->|"resultado"| NOTIF
-    NOTIF -->|"Queue.put()"| Q
-    Q -->|"Queue.get()"| SRV
-    SRV -->|"job_id / ruta lista"| C1
-    SRV -->|"job_id / ruta lista"| C2
+    H1 -->|"os.pipe() write_fd"| DISP
+    H2 -->|"os.pipe() write_fd"| DISP
+    HN -->|"os.pipe() write_fd"| DISP
 
-    WA --> OUT
-    WB --> OUT
-    WA --> DB
-    WB --> DB
+    DISP -->|"Celery task .delay()"| REDIS
+    DISP -->|"INSERT job PENDING"| DB
+
+    REDIS -->|"toma tarea"| WA
+    REDIS -->|"toma tarea"| WB
+    REDIS -->|"toma tarea"| WN
+
+    WA -->|"result backend"| REDIS
+    WB -->|"result backend"| REDIS
+    WN -->|"result backend"| REDIS
+
+    WA -->|"UPDATE DONE"| DB
+    WB -->|"UPDATE DONE"| DB
+    WN -->|"UPDATE DONE"| DB
+
+    REDIS -->|"imagen procesada"| H1
+    REDIS -->|"imagen procesada"| H2
+    REDIS -->|"imagen procesada"| HN
+
+    H1 -->|"TCP Socket resultado"| CLI
 ```
 
-## Diagrama de secuencia
+---
+
+## Flujo de una Solicitud (Sequence Diagram)
 
 ```mermaid
 sequenceDiagram
-    participant C as Cliente CLI
-    participant S as Servidor (asyncio)
-    participant R as Redis
-    participant W as Worker Celery
-    participant N as Notificador (multiprocessing)
+    actor Usuario
+    participant CLI as Cliente CLI
+    participant SRV as Servidor TCP
+    participant HIJO as Proceso Hijo
+    participant DISP as Dispatcher
+    participant REDIS as Redis
+    participant WORKER as Worker Celery
+    participant DB as SQLite
 
-    C->>S: Socket TCP — header JSON + bytes imagen
-    S->>S: Guarda imagen en /tmp/uploads/
-    S->>R: celery.delay(job_id, tipo, ruta, metadata)
-    S-->>C: Responde job_id
-
-    R->>W: Entrega tarea
-    W->>W: Procesa imagen con Pillow
-    W->>W: Guarda en /outputs/ y registra en SQLite
-    W->>N: Publica resultado en Redis backend
-
-    N->>N: Detecta job finalizado
-    N->>S: Queue.put({job_id, ruta_salida})
-    S->>C: Notifica imagen lista + ruta
+    Usuario->>CLI: python client.py --image foto.jpg --type watermark
+    CLI->>CLI: argparse — valida argumentos
+    CLI->>SRV: TCP connect() puerto 9000
+    SRV->>HIJO: fork()
+    HIJO-->>SRV: proceso hijo creado
+    CLI->>HIJO: send(imagen bytes + JSON metadata)
+    Note over HIJO: asyncio — lee payload sin bloquear
+    HIJO->>DISP: os.pipe() write_fd — escribe trabajo
+    DISP->>DB: INSERT job status=PENDING
+    DISP->>REDIS: process_image.delay(job_id, ...)
+    Note over REDIS: encola tarea Celery
+    REDIS->>WORKER: entrega tarea
+    WORKER->>DB: UPDATE status=PROCESSING
+    Note over WORKER: Pillow — aplica watermark o template
+    WORKER->>DB: UPDATE status=DONE
+    WORKER->>REDIS: guarda resultado (result backend)
+    HIJO->>REDIS: result.get(job_id) — espera resultado
+    REDIS-->>HIJO: imagen procesada (bytes)
+    HIJO->>CLI: TCP send(imagen procesada)
+    CLI->>CLI: guarda imagen en disco
+    CLI-->>Usuario: Imagen guardada como output_foto.jpg
 ```
 
-## Nodos y mecanismos de IPC
+---
 
-| Nodo | Tecnología | Rol |
-|---|---|---|
-| Cliente CLI | `socket`, `argparse` | Envía imagen y metadata |
-| Servidor principal | `asyncio` | Acepta N clientes concurrentes, encola tareas |
-| Redis | Redis | Broker de tareas Celery |
-| Workers | `Celery`, `Pillow` | Procesan imágenes en paralelo |
-| Proceso Notificador | `multiprocessing.Process` | Detecta resultados y los pasa por IPC |
-| `multiprocessing.Queue` | IPC | Comunicación notificador → servidor |
-| Base de datos | SQLite | Persistencia de jobs y metadata |
+## Mecanismos de IPC — Vista Simplificada
+
+```mermaid
+flowchart LR
+    subgraph Proceso_Padre["Proceso Padre (server.py)"]
+        SRV["Servidor TCP\npuerto 9000"]
+    end
+
+    subgraph Proceso_Hijo["Proceso Hijo (fork)"]
+        ASYNC["asyncio\nI/O no bloqueante"]
+        PIPE_W["os.pipe()\nwrite_fd"]
+    end
+
+    subgraph Dispatcher["Proceso Dispatcher"]
+        PIPE_R["os.pipe()\nread_fd"]
+        CELERY_SEND["Celery\n.delay()"]
+    end
+
+    subgraph Workers["Workers Celery (paralelos)"]
+        W1["Worker 1\nPillow"]
+        W2["Worker 2\nPillow"]
+    end
+
+    CLI(["Cliente TCP"]) -->|TCP| SRV
+    SRV -->|fork| ASYNC
+    ASYNC --> PIPE_W
+    PIPE_W -->|IPC| PIPE_R
+    PIPE_R --> CELERY_SEND
+    CELERY_SEND -->|Redis| W1
+    CELERY_SEND -->|Redis| W2
+    W1 -->|result backend| ASYNC
+    W2 -->|result backend| ASYNC
+    ASYNC -->|TCP| CLI
+```
+
+---
+
+## Mecanismos Concurrentes y de Sincronización
+
+| Mecanismo | Dónde se usa | Por qué |
+|-----------|-------------|---------|
+| `fork()` | Servidor por cada cliente | Manejo concurrente de múltiples clientes de forma aislada |
+| `os.pipe()` | Proceso hijo → Dispatcher | IPC unidireccional para pasar el trabajo entre procesos |
+| `asyncio` | Proceso hijo al leer del socket | I/O asíncrono para no bloquear esperando el payload |
+| `Celery + Redis` | Dispatcher → Workers | Cola de tareas distribuida para paralelismo en el procesamiento |
+| `Redis result backend` | Workers → Proceso hijo | Notificación del resultado procesado |
+| `argparse` | Cliente CLI | Parseo y validación de argumentos de línea de comandos |
