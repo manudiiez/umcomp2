@@ -1,21 +1,3 @@
-# Descripción de la aplicación
+# Descripción de la Aplicación
 
-Quiero armar una app cliente-servidor de procesamiento de imágenes orientada 
-a una inmobiliaria. El cliente envía una imagen desde la línea de comandos 
-indicando el perfil de destino (portal web o Instagram). El servidor recibe 
-las conexiones de forma concurrente usando asyncio (I/O no bloqueante), 
-encola cada imagen como un job, y workers especializados la procesan en 
-paralelo según el perfil solicitado. Una vez procesada, el servidor devuelve 
-la imagen al cliente que la envió.
-
-- Se usa concurrencia en el servidor mediante asyncio para manejar múltiples 
-  clientes simultáneos sin crear un thread por conexión, lo que permite 
-  escalar a muchos usuarios (por ejemplo, múltiples inmobiliarias) sin 
-  overhead excesivo.
-- Se usa paralelismo en el procesamiento mediante workers como procesos 
-  independientes (multiprocessing), ya que el procesamiento de imágenes 
-  es CPU-intensivo y asyncio no es adecuado para ese tipo de carga.
-- Las entidades servidor y workers se comunican de manera asincrónica 
-  usando multiprocessing.Queue como mecanismo de IPC.
-- El cliente parsea argumentos por línea de comandos (--imagen, --perfil, 
-  --host, --puerto).
+Quiero armar una app cli-serv donde el cliente envíe una imagen y metadata de una propiedad (precio, dirección, ambientes) indicando el tipo de procesamiento: `portal` (marca de agua) o `instagram` (plantilla visual con los datos). El servidor recibe múltiples clientes de forma concurrente usando `asyncio`, encola cada imagen como tarea en Celery/Redis, y los workers la procesan en paralelo con Pillow. Una vez procesada, el resultado se comunica al proceso principal del servidor mediante una `multiprocessing.Queue` (IPC), que notifica al cliente que su imagen está lista. Las imágenes procesadas se guardan en disco y la metadata en SQLite.

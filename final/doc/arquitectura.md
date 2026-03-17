@@ -1,40 +1,78 @@
-# Arquitectura del sistema
+# Arquitectura del Sistema
 
-## Diagrama 
+## Diagrama general
+
 ```mermaid
-graph LR
-    C1["Cliente 1\n--perfil portal"] -->|TCP socket| S
-    C2["Cliente 2\n--perfil instagram"] -->|TCP socket| S
-    CN["Cliente N"] -->|TCP socket| S
+flowchart TD
+    C1["Cliente CLI\n--tipo portal --file casa.jpg"]
+    C2["Cliente CLI\n--tipo instagram --file depto.jpg"]
 
-    S["Servidor\nasyncio"] -->|multiprocessing.Queue| Q["Cola de tareas\nIPC"]
+    SRV["Servidor Principal\nasyncio.start_server()"]
 
-    Q -->|job| WP["Worker portal\nMarca de agua + resize"]
-    Q -->|job| WI["Worker instagram\nPlantilla + crop"]
+    NOTIF["Proceso Notificador\nmultiprocessing.Process"]
+    Q["multiprocessing.Queue\nIPC"]
 
-    WP -->|imagen procesada| S
-    WI -->|imagen procesada| S
+    REDIS["Redis\nBroker Celery"]
 
-    S -->|historial| DB["Base de datos\nSQLite"]
+    WA["Worker A\nCelery — tipo portal\nPillow: marca de agua"]
+    WB["Worker B\nCelery — tipo instagram\nPillow: plantilla visual"]
+
+    DB["SQLite\npropimager.db"]
+    OUT["Disco\n/outputs/portal/\n/outputs/instagram/"]
+
+    C1 -->|"Socket TCP\nJSON + bytes imagen"| SRV
+    C2 -->|"Socket TCP\nJSON + bytes imagen"| SRV
+
+    SRV -->|"celery.delay()"| REDIS
+    REDIS --> WA
+    REDIS --> WB
+
+    WA -->|"resultado"| NOTIF
+    WB -->|"resultado"| NOTIF
+    NOTIF -->|"Queue.put()"| Q
+    Q -->|"Queue.get()"| SRV
+    SRV -->|"job_id / ruta lista"| C1
+    SRV -->|"job_id / ruta lista"| C2
+
+    WA --> OUT
+    WB --> OUT
+    WA --> DB
+    WB --> DB
 ```
 
-## Componentes y conectividad
+## Diagrama de secuencia
 
+```mermaid
+sequenceDiagram
+    participant C as Cliente CLI
+    participant S as Servidor (asyncio)
+    participant R as Redis
+    participant W as Worker Celery
+    participant N as Notificador (multiprocessing)
+
+    C->>S: Socket TCP — header JSON + bytes imagen
+    S->>S: Guarda imagen en /tmp/uploads/
+    S->>R: celery.delay(job_id, tipo, ruta, metadata)
+    S-->>C: Responde job_id
+
+    R->>W: Entrega tarea
+    W->>W: Procesa imagen con Pillow
+    W->>W: Guarda en /outputs/ y registra en SQLite
+    W->>N: Publica resultado en Redis backend
+
+    N->>N: Detecta job finalizado
+    N->>S: Queue.put({job_id, ruta_salida})
+    S->>C: Notifica imagen lista + ruta
 ```
-[Cliente 1] ──┐
-[Cliente 2] ──┤── TCP socket ──→ [Servidor asyncio] ──→ [Queue IPC] ──→ [Worker portal]
-[Cliente N] ──┘                         ↑                               [Worker instagram]
-                                        └─────── imagen procesada ───────────┘
-                                        ↓
-                                  [Base de datos SQLite]
-```
 
-## Mecanismos utilizados
+## Nodos y mecanismos de IPC
 
-| Mecanismo       | Dónde se usa                 | Por qué                                      |
-| --------------- | ---------------------------- | -------------------------------------------- |
-| asyncio         | Servidor: manejo de clientes | I/O bound, escala sin overhead de threads    |
-| multiprocessing | Workers de procesamiento     | CPU bound, necesita paralelismo real         |
-| Queue (IPC)     | Servidor → Workers           | Desacopla recepción de procesamiento         |
-| TCP Sockets     | Cliente ↔ Servidor           | Comunicación confiable, orientada a conexión |
-| SQLite          | Servidor → DB                | Historial liviano, sin dependencias extras   |
+| Nodo | Tecnología | Rol |
+|---|---|---|
+| Cliente CLI | `socket`, `argparse` | Envía imagen y metadata |
+| Servidor principal | `asyncio` | Acepta N clientes concurrentes, encola tareas |
+| Redis | Redis | Broker de tareas Celery |
+| Workers | `Celery`, `Pillow` | Procesan imágenes en paralelo |
+| Proceso Notificador | `multiprocessing.Process` | Detecta resultados y los pasa por IPC |
+| `multiprocessing.Queue` | IPC | Comunicación notificador → servidor |
+| Base de datos | SQLite | Persistencia de jobs y metadata |
